@@ -39,16 +39,16 @@ public/
   game.js      Three.js 렌더링 · 입력 · 사운드 · 카메라
   fight.js     게임 로직 (펀치/회피 판정, AI, 라운드) — 렌더링과 분리
   pose.js      선수 자세/애니메이션 계산
-render.yaml    Render 배포 설정
+server.js      Render Web Service용 Node 서버 (외부 패키지 없음)
+package.json   npm start 스크립트
+render.yaml    Render Blueprint 설정
 ```
-빌드 과정이 없는 정적 사이트이며, Three.js는 CDN(unpkg)에서 불러옵니다.
+Three.js는 브라우저에서 CDN(unpkg)으로 불러옵니다.
 
 ## 로컬에서 실행
-ES 모듈을 쓰기 때문에 파일을 더블클릭하면 안 되고, 간단한 서버로 열어야 합니다.
 ```bash
-cd public
-python3 -m http.server 8000
-# 브라우저에서 http://localhost:8000
+npm start
+# 브라우저에서 http://localhost:3000
 ```
 
 ## GitHub에 올리기
@@ -61,16 +61,20 @@ git remote add origin https://github.com/<내아이디>/fps-boxing.git
 git push -u origin main
 ```
 
-## Render 배포
-**방법 A — Blueprint (render.yaml 사용)**
-1. Render 대시보드 → **New → Blueprint**
-2. 위 GitHub 저장소 선택 → Apply
+## Render Web Service로 배포
+1. Render 대시보드 → **New → Web Service**
+2. GitHub 저장소 연결 후 `fps-boxing` 선택
+3. 설정
+   - **Language / Runtime**: Node
+   - **Branch**: main
+   - **Build Command**: `npm install`
+   - **Start Command**: `npm start`
+   - **Instance Type**: Free (원하는 것)
+4. (선택) Advanced → **Health Check Path**: `/healthz`
+5. **Create Web Service** → 배포가 끝나면 `https://fps-boxing-xxxx.onrender.com` 주소로 접속
 
-**방법 B — 직접 Static Site 만들기**
-1. Render 대시보드 → **New → Static Site**
-2. 저장소 선택
-3. Build Command: 비워두거나 `echo ok`
-4. Publish Directory: `public`
-5. Create Static Site
+> `render.yaml`이 들어 있으므로 **New → Blueprint**로 저장소를 고르면 위 설정이 자동으로 적용되기도 합니다.
 
-이후 GitHub에 push할 때마다 자동으로 다시 배포됩니다.
+- 서버는 Render가 넘겨주는 `PORT` 환경변수를 자동으로 사용합니다.
+- 무료 인스턴스는 15분간 접속이 없으면 잠들어서, 다음 첫 접속 때 깨어나는 데 30초~1분 정도 걸릴 수 있습니다.
+- GitHub에 push하면 자동으로 다시 배포됩니다.

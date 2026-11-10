@@ -1,0 +1,13 @@
+{
+  "name": "fps-boxing",
+  "version": "1.0.0",
+  "description": "1인칭 복싱 게임 (Three.js)",
+  "main": "server.js",
+  "private": true,
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

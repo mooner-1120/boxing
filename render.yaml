@@ -1,10 +1,8 @@
 services:
   - type: web
     name: fps-boxing
-    runtime: static
-    buildCommand: echo "no build needed"
-    staticPublishPath: ./public
-    headers:
-      - path: /*
-        name: Cache-Control
-        value: no-cache
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /healthz
