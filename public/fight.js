@@ -75,17 +75,22 @@ function newBrain(D) {
   };
 }
 
-export function makeGame(difficulty = 'normal') {
+// opts.pvp = true 이면 ai 자리를 두 번째 사람이 조작 (온라인 대전)
+export function makeGame(difficulty = 'normal', opts = {}) {
   const D = DIFFICULTY[difficulty] || DIFFICULTY.normal;
-  const player = makeFighter('YOU', 0, 1.4, { hp: 120 });
-  const ai = makeFighter('IRON KIM', 0, -1.4, { hp: D.hp, slow: D.slow, dmgMul: D.dmgMul, tell: D.tell });
-  ai.brain = newBrain(D);
+  const pvp = !!opts.pvp;
+  const player = makeFighter(opts.name1 || 'YOU', 0, 1.4, { hp: 120 });
+  const ai = pvp
+    ? makeFighter(opts.name2 || 'P2', 0, -1.4, { hp: 120 })
+    : makeFighter('IRON KIM', 0, -1.4, { hp: D.hp, slow: D.slow, dmgMul: D.dmgMul, tell: D.tell });
+  if (!pvp) ai.brain = newBrain(D);
+  player.buffer = []; ai.buffer = [];
   const g = {
-    player, ai, difficulty, D,
+    player, ai, difficulty, D, pvp,
     round: 1, timer: ROUND_TIME, state: 'intro', stateT: 0,
     count: 0, downed: null, mash: 0, mashNeed: 0, tko: false,
     scores: { p: [], a: [] }, roundKD: { p: 0, a: 0 },
-    winner: null, result: '', time: 0, buffer: [], events: [],
+    winner: null, result: '', time: 0, events: [],
   };
   emit(g, { type: 'roundStart', round: 1 });
   return g;
@@ -202,9 +207,9 @@ function knockdown(g, f) {
   g.state = 'count'; g.stateT = 0; g.count = 0; g.downed = f; g.mash = 0;
   g.mashNeed = 10 + (f.kd - 1) * 9;
   g.tko = f.kd >= 3;
-  f.getUp = f === g.ai ? Math.min(9, 2 + f.kd * 2 + Math.floor(Math.random() * 3)) : 0;
+  f.getUp = f === g.ai && !g.pvp ? Math.min(9, 2 + f.kd * 2 + Math.floor(Math.random() * 3)) : 0;
   if (f === g.player) g.roundKD.p++; else g.roundKD.a++;
-  g.buffer.length = 0;
+  g.player.buffer.length = 0; g.ai.buffer.length = 0;
   emit(g, { type: 'knockdown', who: f, kd: f.kd, tko: g.tko });
 }
 
@@ -299,22 +304,28 @@ function separate(g) {
   }
 }
 
-function handleInput(g, dt, input) {
-  const p = g.player;
-  for (const ev of input.presses) g.buffer.push({ ...ev, age: 0 });
+function handleInput(g, p, dt, input) {
+  if (!input) return;
+  for (const ev of input.presses || []) {
+    if (ev.kind === 'punch' && !MOVES[ev.id]) continue;
+    if (ev.kind === 'evade' && !EVADES[ev.id]) continue;
+    p.buffer.push({ kind: ev.kind, id: ev.id, dir: ev.dir === -1 ? -1 : 1, age: 0 });
+  }
   p.guard = !!input.guard && canGuard(p);
   p.crouch = !!input.crouch && !p.down;
-  for (const b of g.buffer) b.age += dt;
-  g.buffer = g.buffer.filter((b) => b.age < 0.2);
-  const item = g.buffer[0];
+  for (const b of p.buffer) b.age += dt;
+  p.buffer = p.buffer.filter((b) => b.age < 0.2);
+  const item = p.buffer[0];
   if (!item) return;
   if (item.kind === 'punch' && canPunch(p)) {
     const id = p.crouch && BODY_VERSION[item.id] ? BODY_VERSION[item.id] : item.id;
-    startPunch(g, p, id, 0); g.buffer.shift();
+    startPunch(g, p, id, 0); p.buffer.shift();
   } else if (item.kind === 'evade' && canEvade(p)) {
-    startEvade(g, p, item.id, item.dir || 1); g.buffer.shift();
+    startEvade(g, p, item.id, item.dir || 1); p.buffer.shift();
   }
 }
+
+const axis = (v) => (typeof v === 'number' && isFinite(v) ? clamp(v, -1, 1) : 0);
 
 // ------------------------------------------------------------ AI
 function aiDefend(g, id) {
@@ -403,7 +414,8 @@ function aiThink(g, dt) {
 }
 
 // ------------------------------------------------------------ 메인 업데이트
-export function update(g, dt, input) {
+// input = player(P1) 입력, input2 = pvp 모드에서 ai 자리(P2) 입력
+export function update(g, dt, input, input2) {
   g.time += dt; g.stateT += dt;
   const p = g.player, a = g.ai;
   switch (g.state) {
@@ -413,14 +425,16 @@ export function update(g, dt, input) {
       break;
     case 'fight':
       g.timer = Math.max(0, g.timer - dt);
-      handleInput(g, dt, input);
+      handleInput(g, p, dt, input);
+      if (g.pvp) handleInput(g, a, dt, input2);
       if (g.state !== 'fight') break;
-      aiThink(g, dt);
+      if (!g.pvp) aiThink(g, dt);
       tickFighter(g, p, dt, true);
       tickFighter(g, a, dt, true);
       if (g.state !== 'fight') break;
-      moveFighter(g, p, input.fwd || 0, input.strafe || 0, dt);
-      moveFighter(g, a, a.brain.fwd, a.brain.strafe, dt);
+      moveFighter(g, p, axis(input && input.fwd), axis(input && input.strafe), dt);
+      if (g.pvp) moveFighter(g, a, axis(input2 && input2.fwd), axis(input2 && input2.strafe), dt);
+      else moveFighter(g, a, a.brain.fwd, a.brain.strafe, dt);
       separate(g);
       if (g.timer <= 0) endRound(g);
       break;
@@ -431,8 +445,9 @@ export function update(g, dt, input) {
       const c = Math.min(10, Math.floor(g.stateT));
       if (c > g.count) { g.count = c; emit(g, { type: 'count', n: c }); }
       if (g.tko) { if (g.stateT > 2.5) finish(g, f === p ? 'ai' : 'player', 'TKO'); break; }
-      if (f === p) g.mash += input.mash || 0;
-      const rise = f === a ? g.count >= f.getUp : (g.mash >= g.mashNeed && g.count >= 2);
+      const mashIn = f === p ? input : g.pvp ? input2 : null;
+      if (mashIn) g.mash += Math.min(5, mashIn.mash || 0);
+      const rise = f === a && !g.pvp ? g.count >= f.getUp : (g.mash >= g.mashNeed && g.count >= 2);
       if (rise && g.count < 10) getUp(g, f);
       else if (g.count >= 10) finish(g, f === p ? 'ai' : 'player', 'KO');
       break;
@@ -450,5 +465,5 @@ export function update(g, dt, input) {
       tickFighter(g, p, dt, false); tickFighter(g, a, dt, false);
       break;
   }
-  if (input) { input.presses.length = 0; input.mash = 0; }
+  for (const inp of [input, input2]) if (inp) { if (inp.presses) inp.presses.length = 0; inp.mash = 0; }
 }

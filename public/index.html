@@ -24,6 +24,7 @@
         <div class="bar st"><i id="pSt"></i></div>
       </div>
       <div class="clock">
+        <div id="ping" class="hidden"></div>
         <div id="round">ROUND 1</div>
         <div id="timer">1:30</div>
       </div>
@@ -75,12 +76,28 @@
     <div class="panel">
       <div class="logo">FPS <span>BOXING</span></div>
       <p class="tag">1인칭 복싱 · 3라운드 · 상대에게 시선 고정</p>
-      <div class="diff">
-        <button data-diff="easy">쉬움</button>
-        <button data-diff="normal" class="sel">보통</button>
-        <button data-diff="hard">어려움</button>
+      <div class="mode-tabs">
+        <button id="tabSolo" class="sel">AI 대전</button>
+        <button id="tabOnline">온라인 1:1</button>
       </div>
-      <button id="startBtn" class="big">경기 시작</button>
+      <div id="soloBox">
+        <div class="diff">
+          <button data-diff="easy">쉬움</button>
+          <button data-diff="normal" class="sel">보통</button>
+          <button data-diff="hard">어려움</button>
+        </div>
+        <button id="startBtn" class="big">경기 시작</button>
+      </div>
+      <div id="onlineBox" class="hidden">
+        <input id="nameInput" maxlength="12" placeholder="닉네임" />
+        <button id="quickBtn" class="big">빠른 매칭</button>
+        <div class="row">
+          <button id="createBtn">방 만들기</button>
+          <input id="codeInput" maxlength="4" placeholder="방 코드" />
+          <button id="joinBtn">참가</button>
+        </div>
+        <p id="onlineMsg" class="tag small"></p>
+      </div>
       <div class="tips">
         <h3>팁</h3>
         <ul>
@@ -95,9 +112,21 @@
     </div>
   </div>
 
+  <div id="lobby" class="overlay hidden">
+    <div class="panel small">
+      <div class="logo small-logo">WAITING</div>
+      <p id="lobbyText" class="tag">상대를 찾는 중...</p>
+      <div id="lobbyCode" class="room-code hidden"></div>
+      <p id="lobbyHint" class="tag small hidden">친구에게 이 코드를 알려주세요</p>
+      <div class="spinner"></div>
+      <button id="cancelBtn">취소</button>
+    </div>
+  </div>
+
   <div id="pause" class="overlay hidden">
     <div class="panel small">
       <div class="logo">PAUSED</div>
+      <p id="pauseNote" class="tag small hidden">온라인 경기는 멈추지 않습니다 — 지금도 진행 중이에요!</p>
       <button id="resumeBtn" class="big">계속하기</button>
       <button id="quitBtn">메뉴로</button>
     </div>

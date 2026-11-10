@@ -1,6 +1,6 @@
 // game.js — Three.js 렌더링, 입력, 사운드, HUD
 import * as THREE from 'three';
-import { makeGame, update, MOVES, RING_HALF, ROUND_TIME } from './fight.js';
+import { makeGame, update, MOVES, EVADES, RING_HALF, ROUND_TIME } from './fight.js';
 import { poseOf } from './pose.js';
 
 // ============================================================ 기본 셋업
@@ -415,6 +415,7 @@ let weaveAlt = 1;
 
 window.addEventListener('keydown', (e) => {
   const code = e.code;
+  if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
   if (['Space', 'Tab', 'ShiftLeft', 'ShiftRight'].includes(code) || PUNCH_KEYS[code] || EVADE_KEYS[code]) e.preventDefault();
   if (!running) return;
   if (code === 'Escape' || code === 'KeyP') { if (!e.repeat) togglePause(); return; }
@@ -581,11 +582,13 @@ function showResult() {
   const g = game;
   const win = g.winner === 'player', draw = g.winner === 'draw';
   $('resTitle').innerHTML = draw ? 'DRAW' : win ? 'YOU <span>WIN</span>' : 'YOU <span>LOSE</span>';
-  $('resSub').textContent = `${g.result} · ${DIFF_LABEL[difficulty]} 난이도` + (g.result === '판정' || g.result === '무승부' ? ` · ${sum(g.scores.p)} : ${sum(g.scores.a)}` : ` · ${g.round}라운드`);
+  const modeText = net.online ? `온라인 대전 vs ${oppName()}` : `${DIFF_LABEL[difficulty]} 난이도`;
+  $('resSub').textContent = `${g.result} · ${modeText}` + (g.result === '판정' || g.result === '무승부' ? ` · ${sum(g.scores.p)} : ${sum(g.scores.a)}` : ` · ${g.round}라운드`)
+    + (net.leftText ? ` · ${net.leftText}` : '');
   const p = g.player.stats, a = g.ai.stats;
   const acc = (s) => s.thrown ? Math.round(s.landed / s.thrown * 100) + '%' : '-';
   const rows = [
-    ['', 'YOU', 'IRON KIM'],
+    ['', net.online ? esc(myName()) : 'YOU', net.online ? esc(oppName()) : 'IRON KIM'],
     ['적중 / 시도', `${p.landed} / ${p.thrown}`, `${a.landed} / ${a.thrown}`],
     ['정확도', acc(p), acc(a)],
     ['준 데미지', Math.round(p.dmg), Math.round(a.dmg)],
@@ -594,8 +597,14 @@ function showResult() {
     ...g.scores.p.map((v, i) => [`R${i + 1} 채점`, v, g.scores.a[i]]),
   ];
   $('resTable').innerHTML = rows.map((r, i) => `<tr>${r.map((c) => i ? `<td>${c}</td>` : `<th>${c}</th>`).join('')}</tr>`).join('');
+  const again = $('againBtn');
+  if (net.online) {
+    again.disabled = net.oppLeft;
+    again.textContent = net.oppLeft ? '상대가 나갔습니다' : '재대결 신청';
+  } else { again.disabled = false; again.textContent = '다시 하기'; }
   $('result').classList.remove('hidden');
 }
+const esc = (t) => String(t).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const sum = (arr) => arr.reduce((s, v) => s + v, 0);
 const DIFF_LABEL = { easy: '쉬움', normal: '보통', hard: '어려움' };
 
@@ -604,17 +613,27 @@ document.querySelectorAll('.diff button').forEach((b) => b.addEventListener('cli
   document.querySelectorAll('.diff button').forEach((x) => x.classList.remove('sel'));
   b.classList.add('sel'); difficulty = b.dataset.diff;
 }));
-function startMatch() {
+function beginMatchCommon() {
   sfx.init(); if (sfx.ctx && sfx.ctx.state === 'suspended') sfx.ctx.resume();
-  game = makeGame(difficulty);
   running = true; paused = false; held.clear();
-  combo = 0; excite = 0; hurtV = 0; downA = downP = 0;
-  $('menu').classList.add('hidden'); $('result').classList.add('hidden'); $('pause').classList.add('hidden');
+  combo = 0; excite = 0; hurtV = 0; downA = downP = 0; hitstop = 0;
+  for (const id of ['menu', 'result', 'pause', 'lobby']) $(id).classList.add('hidden');
   hud.classList.remove('hidden');
+  $('pauseNote').classList.toggle('hidden', !net.online);
+  $('ping').classList.toggle('hidden', !net.online);
+}
+function startMatch() {
+  if (net.online) leaveOnline();
+  game = makeGame(difficulty);
+  $('aName').textContent = 'IRON KIM';
+  beginMatchCommon();
 }
 function toMenu() {
+  if (net.online) leaveOnline();
   running = false; paused = false;
-  $('menu').classList.remove('hidden'); $('result').classList.add('hidden'); $('pause').classList.add('hidden');
+  game = makeGame(difficulty);
+  for (const id of ['result', 'pause', 'lobby']) $(id).classList.add('hidden');
+  $('menu').classList.remove('hidden');
   hud.classList.add('hidden'); sfx.crowd(0.03);
 }
 function togglePause() {
@@ -623,10 +642,206 @@ function togglePause() {
   $('pause').classList.toggle('hidden', !paused);
 }
 $('startBtn').addEventListener('click', startMatch);
-$('againBtn').addEventListener('click', startMatch);
+$('againBtn').addEventListener('click', () => {
+  if (!net.online) return startMatch();
+  if (net.oppLeft) return;
+  netSend({ t: 'rematch' });
+  $('againBtn').disabled = true; $('againBtn').textContent = '상대 응답 기다리는 중...';
+});
 $('menuBtn').addEventListener('click', toMenu);
 $('resumeBtn').addEventListener('click', togglePause);
 $('quitBtn').addEventListener('click', toMenu);
+
+// ============================================================ 온라인 1:1
+// 서버가 경기를 계산하고(서버 권한) 30Hz로 상태를 보내면, 클라이언트는 그 사이를 예측해서 부드럽게 그립니다.
+const net = { ws: null, pending: null, online: false, side: 'p1', names: { p1: '', p2: '' },
+  lastSend: 0, lastKey: '', ping: 0, pingT: 0, snapAge: 0, oppLeft: false, leftText: '' };
+const mySide = () => net.side, opSide = () => (net.side === 'p1' ? 'p2' : 'p1');
+const myName = () => net.names[mySide()] || 'YOU';
+const oppName = () => net.names[opSide()] || 'OPPONENT';
+
+function onlineMsg(text, err = false) { const el = $('onlineMsg'); el.textContent = text; el.classList.toggle('err', err); }
+function getName() {
+  const n = $('nameInput').value.trim() || 'PLAYER';
+  try { localStorage.setItem('fpsboxing-name', n); } catch {}
+  return n;
+}
+try { $('nameInput').value = localStorage.getItem('fpsboxing-name') || ''; } catch {}
+
+function netConnect(then) {
+  if (net.ws && net.ws.readyState === 1) return then();
+  net.pending = then;
+  if (net.ws && net.ws.readyState === 0) return;
+  let ws;
+  try { ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws'); }
+  catch { hideLobby(); onlineMsg('서버에 연결할 수 없어요.', true); return; }
+  net.ws = ws;
+  ws.onopen = () => { const f = net.pending; net.pending = null; if (f) f(); };
+  ws.onmessage = (e) => { let m; try { m = JSON.parse(e.data); } catch { return; } onNet(m); };
+  ws.onclose = () => {
+    if (net.ws === ws) net.ws = null;
+    if (net.online && running && game.state !== 'over') onOppLeft('서버 연결이 끊어졌습니다', true);
+    else if (!$('lobby').classList.contains('hidden')) { hideLobby(); onlineMsg('서버 연결이 끊어졌어요. 다시 시도하세요.', true); }
+  };
+}
+function netSend(o) { if (net.ws && net.ws.readyState === 1) net.ws.send(JSON.stringify(o)); }
+
+function showLobby(text, code) {
+  $('lobby').classList.remove('hidden');
+  $('lobbyText').textContent = text;
+  $('lobbyCode').textContent = code || '';
+  $('lobbyCode').classList.toggle('hidden', !code);
+  $('lobbyHint').classList.toggle('hidden', !code);
+}
+function hideLobby() { $('lobby').classList.add('hidden'); }
+
+function onNet(m) {
+  switch (m.t) {
+    case 'waiting':
+      if (m.mode === 'room') showLobby('친구가 들어오길 기다리는 중...', m.code);
+      else showLobby('상대를 찾는 중...');
+      break;
+    case 'error': hideLobby(); onlineMsg(m.msg, true); break;
+    case 'start': startOnline(m); break;
+    case 's': if (net.online && game.online) applySnapshot(m.st, m.ev); break;
+    case 'oppLeft': onOppLeft(m.reason === 'disconnect' ? '상대의 연결이 끊어졌습니다' : '상대가 나갔습니다'); break;
+    case 'rematchWait':
+      if (m.from !== mySide() && !$('result').classList.contains('hidden')) {
+        $('againBtn').disabled = false; $('againBtn').textContent = '재대결 수락!';
+        $('resSub').textContent = `${oppName()} 님이 재대결을 신청했어요!`;
+      }
+      break;
+    case 'pong': net.ping = Math.round(performance.now() - m.ts); break;
+  }
+}
+
+function makeView() {
+  const mk = () => ({ name: '', x: 0, z: 0, tx: 0, tz: 0, vx: 0, vz: 0, hp: 120, maxHp: 120, stam: 100, guard: false, crouch: false,
+    act: null, evade: null, stun: 0, flinch: 0, flinchKind: null, flinchSide: 0, down: false, kd: 0, walk: 0,
+    stats: { thrown: 0, landed: 0, dmg: 0, blocked: 0, evaded: 0 } });
+  return { online: true, got: false, player: mk(), ai: mk(), state: 'intro', stateT: 0, round: 1, timer: ROUND_TIME,
+    count: 0, mash: 0, mashNeed: 1, tko: false, downed: null, scores: { p: [], a: [] }, winner: null, result: '', time: 0, events: [] };
+}
+
+function startOnline(m) {
+  net.side = m.side; net.names = m.names; net.online = true; net.oppLeft = false; net.leftText = '';
+  game = makeView();
+  $('aName').textContent = oppName();
+  beginMatchCommon();
+}
+
+function leaveOnline() {
+  netSend({ t: 'leave' });
+  net.online = false; net.oppLeft = false; net.leftText = '';
+}
+
+function onOppLeft(text, connLost = false) {
+  if (!net.online) return;
+  net.oppLeft = true; net.leftText = text;
+  if (running && game.state !== 'over') {
+    game.state = 'over'; game.winner = connLost ? 'draw' : 'player'; game.result = connLost ? '경기 중단' : '기권승';
+    showMsg(connLost ? 'DISCONNECTED' : 'YOU WIN', 2, text);
+    showResult();
+  } else if (!$('result').classList.contains('hidden')) {
+    $('againBtn').disabled = true; $('againBtn').textContent = '상대가 나갔습니다';
+    $('resSub').textContent = text;
+  }
+}
+
+function copyFighter(dst, src, snap) {
+  const px = dst.x, pz = dst.z;
+  Object.assign(dst, src);
+  dst.tx = src.x; dst.tz = src.z;
+  if (!snap) { dst.x = px; dst.z = pz; }
+}
+
+function applySnapshot(st, ev) {
+  const V = game, me = mySide(), op = opSide();
+  const map = { [me]: V.player, [op]: V.ai };
+  copyFighter(V.player, st[me], !V.got);
+  copyFighter(V.ai, st[op], !V.got);
+  V.got = true; net.snapAge = 0;
+  if (V.state !== 'over' || st.state === 'over') {
+    V.state = st.state; V.winner = !st.winner ? null : st.winner === 'draw' ? 'draw' : st.winner === me ? 'player' : 'ai';
+    V.result = st.result;
+  }
+  V.stateT = st.stateT; V.round = st.round; V.timer = st.timer; V.count = st.count;
+  V.mash = st.mash; V.mashNeed = st.mashNeed || 1; V.tko = st.tko; V.time = st.time;
+  V.downed = st.downed ? map[st.downed] : null;
+  V.scores = me === 'p1' ? { p: st.scores.p, a: st.scores.a } : { p: st.scores.a, a: st.scores.p };
+  for (const e of ev) {
+    const o = { ...e };
+    for (const k of ['who', 'att', 'def']) if (o[k]) o[k] = map[o[k]];
+    if (o.winner) o.winner = o.winner === 'draw' ? 'draw' : o.winner === me ? 'player' : 'ai';
+    V.events.push(o);
+  }
+}
+
+// 스냅샷 사이를 로컬에서 진행시켜 부드럽게 보이게 함
+function viewTick(dt) {
+  const V = game;
+  net.snapAge += dt;
+  for (const f of [V.player, V.ai]) {
+    const A = f.act;
+    if (A) {
+      A.t += dt;
+      const e1 = A.w, e2 = e1 + A.s, e3 = e2 + A.a, e4 = e3 + A.r;
+      A.phase = A.t < e1 ? 'windup' : A.t < e2 ? 'startup' : A.t < e3 ? 'active' : 'recovery';
+      if (A.t >= e4) f.act = null;
+    }
+    if (f.evade) { f.evade.t += dt; if (f.evade.t >= f.evade.dur) f.evade = null; }
+    f.flinch = Math.max(0, f.flinch - dt * 3.5); f.stun = Math.max(0, f.stun - dt);
+    if (net.snapAge < 0.25) { f.tx += f.vx * dt; f.tz += f.vz * dt; }
+    const k = 1 - Math.exp(-dt * 18);
+    f.x += (f.tx - f.x) * k; f.z += (f.tz - f.z) * k;
+    f.walk += Math.hypot(f.vx, f.vz) * dt;
+  }
+  if (V.state === 'fight') V.timer = Math.max(0, V.timer - dt);
+  V.time += dt;
+}
+
+function sendInput() {
+  const now = performance.now();
+  const key = `${input.fwd},${input.strafe},${input.guard},${input.crouch}`;
+  if (input.presses.length || input.mash || key !== net.lastKey || now - net.lastSend > 100) {
+    netSend({ t: 'in', fwd: input.fwd, strafe: input.strafe, guard: input.guard, crouch: input.crouch, presses: input.presses, mash: input.mash });
+    net.lastKey = key; net.lastSend = now;
+  }
+  input.presses = []; input.mash = 0;
+  net.pingT -= 1 / 60;
+  if (net.pingT <= 0) { net.pingT = 2; netSend({ t: 'ping', ts: performance.now() }); }
+  const pe = $('ping'); pe.textContent = `PING ${net.ping}ms`; pe.classList.toggle('bad', net.ping > 150);
+}
+
+// 메뉴 탭 & 온라인 버튼
+$('tabSolo').addEventListener('click', () => {
+  $('tabSolo').classList.add('sel'); $('tabOnline').classList.remove('sel');
+  $('soloBox').classList.remove('hidden'); $('onlineBox').classList.add('hidden');
+});
+$('tabOnline').addEventListener('click', () => {
+  $('tabOnline').classList.add('sel'); $('tabSolo').classList.remove('sel');
+  $('onlineBox').classList.remove('hidden'); $('soloBox').classList.add('hidden');
+  onlineMsg('');
+});
+$('quickBtn').addEventListener('click', () => {
+  const name = getName(); sfx.init(); onlineMsg('');
+  showLobby('서버에 연결하는 중... (처음엔 최대 1분 걸릴 수 있어요)');
+  netConnect(() => netSend({ t: 'quick', name }));
+});
+$('createBtn').addEventListener('click', () => {
+  const name = getName(); sfx.init(); onlineMsg('');
+  showLobby('방을 만드는 중...');
+  netConnect(() => netSend({ t: 'create', name }));
+});
+$('joinBtn').addEventListener('click', () => {
+  const code = $('codeInput').value.trim().toUpperCase();
+  if (code.length !== 4) { onlineMsg('4자리 방 코드를 입력하세요.', true); return; }
+  const name = getName(); sfx.init(); onlineMsg('');
+  showLobby('방에 들어가는 중...');
+  netConnect(() => netSend({ t: 'join', code, name }));
+});
+$('codeInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('joinBtn').click(); });
+$('cancelBtn').addEventListener('click', () => { netSend({ t: 'leave' }); net.pending = null; hideLobby(); });
 
 // ============================================================ 루프
 let last = performance.now();
@@ -635,7 +850,13 @@ function frame(now) {
   let dt = Math.min(0.05, (now - last) / 1000); last = now;
   const g = game, p = g.player, a = g.ai;
 
-  if (running && !paused) {
+  if (running && game.online) {
+    readHeld();
+    sendInput();
+    hitstop = 0;
+    viewTick(dt);
+    processEvents();
+  } else if (running && !paused) {
     readHeld();
     let sdt = dt;
     if (hitstop > 0) { hitstop -= dt; sdt = dt * 0.12; }
@@ -650,8 +871,8 @@ function frame(now) {
   // 자세
   const tpP = poseOf(p, g.time, 0), tpA = poseOf(a, g.time, 1.7);
   smoothPose(dpP, tpP, dt, 32); smoothPose(dpA, tpA, dt, 28);
-  downA += ((a.down || (g.state === 'over' && g.winner === 'player' && g.result !== '판정' && g.result !== '무승부') ? 1 : 0) - downA) * (1 - Math.exp(-dt * 5));
-  downP += ((p.down || (g.state === 'over' && g.winner === 'ai' && g.result !== '판정' && g.result !== '무승부') ? 1 : 0) - downP) * (1 - Math.exp(-dt * 5));
+  downA += ((a.down ? 1 : 0) - downA) * (1 - Math.exp(-dt * 5));
+  downP += ((p.down ? 1 : 0) - downP) * (1 - Math.exp(-dt * 5));
   applyPose(opp, a, p, dpA, tpA.windup, downA);
   applyPose(me, p, a, dpP, null, 0);
 
