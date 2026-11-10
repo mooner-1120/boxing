@@ -1,1 +1,118 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>FPS BOXING</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Noto+Sans+KR:wght@400;700;900&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="./style.css" />
+  <script type="importmap">
+    { "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } }
+  </script>
+</head>
+<body>
+  <canvas id="c"></canvas>
 
+  <!-- HUD -->
+  <div id="hud" class="hidden">
+    <div class="top">
+      <div class="fighter left">
+        <div class="name">YOU <span id="pKd" class="kd"></span></div>
+        <div class="bar hp"><b id="pHpLag"></b><i id="pHp"></i></div>
+        <div class="bar st"><i id="pSt"></i></div>
+      </div>
+      <div class="clock">
+        <div id="round">ROUND 1</div>
+        <div id="timer">1:30</div>
+      </div>
+      <div class="fighter right">
+        <div class="name"><span id="aKd" class="kd"></span> <span id="aName">IRON KIM</span></div>
+        <div class="bar hp"><b id="aHpLag"></b><i id="aHp"></i></div>
+        <div class="bar st"><i id="aSt"></i></div>
+      </div>
+    </div>
+
+    <div id="msg"></div>
+    <div id="sub"></div>
+    <div id="combo"></div>
+
+    <div id="mash" class="hidden">
+      <div>스페이스바 연타로 일어나세요!</div>
+      <div class="bar"><i id="mashBar"></i></div>
+    </div>
+
+    <div id="help">
+      <div class="help-title">조작법 <span>Tab 숨기기</span></div>
+      <div class="cols">
+        <div>
+          <p><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> 이동 (상대 고정)</p>
+          <p><kbd>Shift</kbd> 가드 (누르고 있기)</p>
+          <p><kbd>C</kbd> 덕킹 (누르고 있기)</p>
+          <p><kbd>Q</kbd>/<kbd>E</kbd> 좌/우 슬립</p>
+          <p><kbd>Space</kbd> 위빙 (A/D로 방향)</p>
+          <p><kbd>F</kbd> 스웨이백 &nbsp;<kbd>X</kbd> 패리</p>
+        </div>
+        <div>
+          <p><kbd>J</kbd> 잽 &nbsp;<kbd>K</kbd> 스트레이트</p>
+          <p><kbd>U</kbd> 레프트 훅 &nbsp;<kbd>I</kbd> 라이트 훅</p>
+          <p><kbd>N</kbd> 레프트 어퍼 &nbsp;<kbd>M</kbd> 라이트 어퍼</p>
+          <p><kbd>H</kbd>/<kbd>L</kbd> 좌/우 바디훅</p>
+          <p><kbd>C</kbd>+펀치 = 바디샷 &nbsp;<kbd>R</kbd> 페인트</p>
+          <p><kbd>Esc</kbd> 일시정지</p>
+        </div>
+      </div>
+    </div>
+
+    <div id="floaters"></div>
+    <div id="vignette"></div>
+    <div id="flash"></div>
+  </div>
+
+  <!-- 메뉴 -->
+  <div id="menu" class="overlay">
+    <div class="panel">
+      <div class="logo">FPS <span>BOXING</span></div>
+      <p class="tag">1인칭 복싱 · 3라운드 · 상대에게 시선 고정</p>
+      <div class="diff">
+        <button data-diff="easy">쉬움</button>
+        <button data-diff="normal" class="sel">보통</button>
+        <button data-diff="hard">어려움</button>
+      </div>
+      <button id="startBtn" class="big">경기 시작</button>
+      <div class="tips">
+        <h3>팁</h3>
+        <ul>
+          <li>상대 글러브가 <b>빛나면</b> 펀치가 날아옵니다 — 그때 회피하세요.</li>
+          <li>스트레이트는 <b>슬립/패리</b>, 훅은 <b>덕킹/위빙</b>, 어퍼컷은 <b>스웨이백</b>으로 피합니다.</li>
+          <li>회피 직후 반격은 <b>카운터</b>(1.4배 데미지)가 됩니다.</li>
+          <li>가드는 머리 공격을 막지만 바디샷과 어퍼컷은 일부 뚫고 들어옵니다.</li>
+          <li>펀치와 회피는 스태미나를 씁니다. 지치면 느리고 약해집니다.</li>
+        </ul>
+      </div>
+      <p class="note">키보드가 필요합니다 (PC 권장)</p>
+    </div>
+  </div>
+
+  <div id="pause" class="overlay hidden">
+    <div class="panel small">
+      <div class="logo">PAUSED</div>
+      <button id="resumeBtn" class="big">계속하기</button>
+      <button id="quitBtn">메뉴로</button>
+    </div>
+  </div>
+
+  <div id="result" class="overlay hidden">
+    <div class="panel small">
+      <div id="resTitle" class="logo">YOU WIN</div>
+      <p id="resSub" class="tag"></p>
+      <table id="resTable"></table>
+      <button id="againBtn" class="big">다시 하기</button>
+      <button id="menuBtn">메뉴로</button>
+    </div>
+  </div>
+
+  <script type="module" src="./game.js"></script>
+</body>
+</html>
