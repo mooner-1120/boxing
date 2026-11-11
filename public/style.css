@@ -128,3 +128,6 @@ input:focus { border-color: var(--blue); }
 @keyframes spin { to { transform: rotate(360deg); } }
 #ping { font: 400 13px/1 'Bebas Neue', sans-serif; letter-spacing: 1px; color: var(--dim); margin-bottom: 2px; }
 #ping.bad { color: #ff7b7b; }
+
+#help .hh { color: var(--ink); font-weight: 900; margin-top: 0; }
+#help .dim { color: rgba(245,243,238,0.45); font-size: 11px; }

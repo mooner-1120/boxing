@@ -407,29 +407,46 @@ const sfx = {
 };
 
 // ============================================================ 입력
-const PUNCH_KEYS = { KeyJ: 'jab', KeyK: 'cross', KeyU: 'lhook', KeyI: 'rhook', KeyN: 'lupper', KeyM: 'rupper', KeyH: 'lbody', KeyL: 'rbody', KeyR: 'feint' };
-const EVADE_KEYS = { KeyQ: 'slipL', KeyE: 'slipR', Space: 'weave', KeyF: 'lean', KeyX: 'parry' };
+// 조작 (키 12개):
+//   J = 왼손, K = 오른손  →  그냥 누르면 잽 / 스트레이트
+//   F 누른 채 = 훅,  V 누른 채 = 어퍼컷,  C(덕킹) 누른 채 = 바디샷 (F+C = 바디훅)
+//   Shift(가드) 누른 채 J = 패리, K = 페인트
+//   Space = 회피: 그냥 = 위빙, A/D 누른 채 = 좌/우 슬립, S 누른 채 = 스웨이백
+const GAME_KEYS = ['Space', 'Tab', 'ShiftLeft', 'ShiftRight', 'KeyJ', 'KeyK', 'KeyF', 'KeyV', 'KeyC'];
 const held = new Set();
 const input = { fwd: 0, strafe: 0, guard: false, crouch: false, presses: [], mash: 0 };
 let weaveAlt = 1;
+const shiftHeld = () => held.has('ShiftLeft') || held.has('ShiftRight');
+
+function punchFor(hand) {
+  const L = hand === 'L';
+  if (shiftHeld()) return L ? { kind: 'evade', id: 'parry', dir: 1 } : { kind: 'punch', id: 'feint' };
+  if (held.has('KeyV')) return { kind: 'punch', id: L ? 'lupper' : 'rupper' };
+  if (held.has('KeyF')) return { kind: 'punch', id: L ? 'lhook' : 'rhook' };   // C를 누르고 있으면 fight.js가 바디훅으로 바꿈
+  return { kind: 'punch', id: L ? 'jab' : 'cross' };                           // C를 누르고 있으면 바디 잽/스트레이트
+}
+
+function evadeFor() {
+  const a = held.has('KeyA'), d = held.has('KeyD');
+  if (a && !d) return { kind: 'evade', id: 'slipL', dir: -1 };
+  if (d && !a) return { kind: 'evade', id: 'slipR', dir: 1 };
+  if (held.has('KeyS')) return { kind: 'evade', id: 'lean', dir: 1 };
+  return { kind: 'evade', id: 'weave', dir: (weaveAlt = -weaveAlt) };
+}
 
 window.addEventListener('keydown', (e) => {
   const code = e.code;
   if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
-  if (['Space', 'Tab', 'ShiftLeft', 'ShiftRight'].includes(code) || PUNCH_KEYS[code] || EVADE_KEYS[code]) e.preventDefault();
+  if (GAME_KEYS.includes(code)) e.preventDefault();
   if (!running) return;
   if (code === 'Escape' || code === 'KeyP') { if (!e.repeat) togglePause(); return; }
   if (code === 'Tab') { if (!e.repeat) document.getElementById('help').classList.toggle('hidden'); return; }
   if (e.repeat) return;
   held.add(code);
   if (paused) return;
-  if (code === 'Space') input.mash++;
-  if (PUNCH_KEYS[code]) input.presses.push({ kind: 'punch', id: PUNCH_KEYS[code] });
-  else if (EVADE_KEYS[code]) {
-    let dir = 1;
-    if (code === 'Space') { dir = held.has('KeyA') ? -1 : held.has('KeyD') ? 1 : (weaveAlt = -weaveAlt); }
-    input.presses.push({ kind: 'evade', id: EVADE_KEYS[code], dir });
-  }
+  if (code === 'KeyJ') input.presses.push(punchFor('L'));
+  else if (code === 'KeyK') input.presses.push(punchFor('R'));
+  else if (code === 'Space') { input.mash++; input.presses.push(evadeFor()); }
 });
 window.addEventListener('keyup', (e) => held.delete(e.code));
 window.addEventListener('blur', () => held.clear());
